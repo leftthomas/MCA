@@ -12,12 +12,12 @@ cfg = edict()
 
 cfg.GPU_ID = '0'
 cfg.EXP = 'anet12'
-cfg.LR = '[0.0001]*100000'
+cfg.LR = '[0.0001]*8000'
 cfg.NUM_ITERS = len(eval(cfg.LR))
 cfg.NUM_CLASSES = 100
 cfg.MODAL = 'all'
 cfg.FEATS_DIM = 2048
-cfg.BATCH_SIZE = 256
+cfg.BATCH_SIZE = 128
 cfg.DATA_PATH = './data/ActivityNet12'
 cfg.NUM_WORKERS = 8
 cfg.LAMBDA = 0.01
