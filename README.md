@@ -3,7 +3,7 @@
 A PyTorch implementation of AGCT based on the paper
 [Attention Guided Collaborative Training for Weakly-supervised Temporal Action Localization]().
 
-![Network Architecture](result/structure.png)
+![Network Architecture](structure.png)
 
 ## Usage
 
