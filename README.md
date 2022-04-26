@@ -13,7 +13,7 @@ corresponding repos.
 For example, to train HAM-Net on THUMOS14 dataset:
 ```
 git clone https://github.com/asrafulashiq/hamnet.git
-mv AGCT/hamnet/* hamnet/*
+mv AGCT/hamnet/* hamnet/
 python main.py
 ```
 
