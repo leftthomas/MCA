@@ -9,12 +9,32 @@ import model
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 
+# Multi-Head Attention
+class MGA(nn.Module):
+    def __init__(self, feat_dim, num_head, temperature):
+        super(MGA, self).__init__()
+        self.num_heads = num_head
+        self.temperature = temperature
+        self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
+
+    def forward(self, x):
+        n, d, l = x.shape
+        k = self.k(x)
+        # [N, H, L, D/H]
+        q = x.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
+        k = k.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
+        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
+        # [N, H, L, L]
+        attn = torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / self.temperature, dim=-1)
+
+        out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
+        return x + out
+
+
 def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1 or classname.find('Linear') != -1:
         # torch_init.xavier_uniform_(m.weight)
-        # import pdb
-        # pdb.set_trace()
         torch_init.kaiming_uniform_(m.weight)
         if type(m.bias) != type(None):
             m.bias.data.fill_(0)
@@ -67,8 +87,9 @@ class CO2(torch.nn.Module):
             nn.Dropout(dropout_ratio),
             nn.Conv1d(embed_dim, embed_dim, 3, padding=1), nn.LeakyReLU(0.2),
             nn.Dropout(0.7), nn.Conv1d(embed_dim, n_class + 1, 1))
-        # self.cadl = CADL()
-        # self.attention = Non_Local_Block(embed_dim,mid_dim,dropout_ratio)
+
+        self.rgb_atte = MGA(1024, args['opt'].num_head, args['opt'].temperature)
+        self.flow_atte = MGA(1024, args['opt'].num_head, args['opt'].temperature)
 
         self.channel_avg = nn.AdaptiveAvgPool1d(1)
         self.batch_avg = nn.AdaptiveAvgPool1d(1)
@@ -79,20 +100,17 @@ class CO2(torch.nn.Module):
     def forward(self, inputs, is_training=True, **args):
         feat = inputs.transpose(-1, -2)
         b, c, n = feat.size()
-        # feat = self.feat_encoder(x)
-        v_atn, vfeat = self.vAttn(feat[:, :1024, :], feat[:, 1024:, :])
-        f_atn, ffeat = self.fAttn(feat[:, 1024:, :], feat[:, :1024, :])
+        rgb, flow = feat[:, :1024, :], feat[:, 1024:, :]
+        rgb, flow = self.rgb_atte(rgb), self.flow_atte(flow)
+        v_atn, vfeat = self.vAttn(rgb, flow)
+        f_atn, ffeat = self.fAttn(flow, rgb)
         x_atn = (f_atn + v_atn) / 2
         nfeat = torch.cat((vfeat, ffeat), 1)
         nfeat = self.fusion(nfeat)
         x_cls = self.classifier(nfeat)
 
-        # fg_mask, bg_mask,dropped_fg_mask = self.cadl(x_cls, x_atn, include_min=True)
-
         return {'feat': nfeat.transpose(-1, -2), 'cas': x_cls.transpose(-1, -2), 'attn': x_atn.transpose(-1, -2),
                 'v_atn': v_atn.transpose(-1, -2), 'f_atn': f_atn.transpose(-1, -2)}
-        # ,fg_mask.transpose(-1, -2), bg_mask.transpose(-1, -2),dropped_fg_mask.transpose(-1, -2)
-        # return att_sigmoid,att_logit, feat_emb, bag_logit, instance_logit
 
     def _multiply(self, x, atn, dim=-1, include_min=False):
         if include_min:
@@ -144,9 +162,6 @@ class CO2(torch.nn.Module):
                       args['opt'].alpha4 * mutual_loss +
                       args['opt'].alpha1 * (loss_norm + v_loss_norm + f_loss_norm) / 3 +
                       args['opt'].alpha2 * (loss_guide + v_loss_guide + f_loss_guide) / 3)
-
-        # output = torch.cosine_similarity(dropped_fg_feat, fg_feat, dim=1)
-        # pdb.set_trace()
 
         return total_loss
 
@@ -241,8 +256,9 @@ class ANT_CO2(torch.nn.Module):
             nn.Dropout(dropout_ratio),
             nn.Conv1d(embed_dim, embed_dim, 3, padding=1), nn.LeakyReLU(0.2),
             nn.Dropout(0.7), nn.Conv1d(embed_dim, n_class + 1, 1))
-        # self.cadl = CADL()
-        # self.attention = Non_Local_Block(embed_dim,mid_dim,dropout_ratio)
+
+        self.rgb_atte = MGA(1024, args['opt'].num_head, args['opt'].temperature)
+        self.flow_atte = MGA(1024, args['opt'].num_head, args['opt'].temperature)
 
         self.channel_avg = nn.AdaptiveAvgPool1d(1)
         self.batch_avg = nn.AdaptiveAvgPool1d(1)
@@ -255,9 +271,11 @@ class ANT_CO2(torch.nn.Module):
     def forward(self, inputs, is_training=True, **args):
         feat = inputs.transpose(-1, -2)
         b, c, n = feat.size()
-        # feat = self.feat_encoder(x)
-        v_atn, vfeat = self.vAttn(feat[:, :1024, :], feat[:, 1024:, :])
-        f_atn, ffeat = self.fAttn(feat[:, 1024:, :], feat[:, :1024, :])
+
+        rgb, flow = feat[:, :1024, :], feat[:, 1024:, :]
+        rgb, flow = self.rgb_atte(rgb), self.flow_atte(flow)
+        v_atn, vfeat = self.vAttn(rgb, flow)
+        f_atn, ffeat = self.fAttn(flow, rgb)
         x_atn = (f_atn + v_atn) / 2
         nfeat = torch.cat((vfeat, ffeat), 1)
         nfeat = self.fusion(nfeat)
@@ -266,12 +284,9 @@ class ANT_CO2(torch.nn.Module):
         x_atn = self.pool(x_atn)
         f_atn = self.pool(f_atn)
         v_atn = self.pool(v_atn)
-        # fg_mask, bg_mask,dropped_fg_mask = self.cadl(x_cls, x_atn, include_min=True)
 
         return {'feat': nfeat.transpose(-1, -2), 'cas': x_cls.transpose(-1, -2), 'attn': x_atn.transpose(-1, -2),
                 'v_atn': v_atn.transpose(-1, -2), 'f_atn': f_atn.transpose(-1, -2)}
-        # ,fg_mask.transpose(-1, -2), bg_mask.transpose(-1, -2),dropped_fg_mask.transpose(-1, -2)
-        # return att_sigmoid,att_logit, feat_emb, bag_logit, instance_logit
 
     def _multiply(self, x, atn, dim=-1, include_min=False):
         if include_min:
@@ -322,9 +337,6 @@ class ANT_CO2(torch.nn.Module):
             'opt'].alpha3 * loss_3_supp_Contrastive + mutual_loss +
                       args['opt'].alpha1 * (loss_norm + v_loss_norm + f_loss_norm) / 3 +
                       args['opt'].alpha2 * (loss_guide + v_loss_guide + f_loss_guide) / 3)
-
-        # output = torch.cosine_similarity(dropped_fg_feat, fg_feat, dim=1)
-        # pdb.set_trace()
 
         return total_loss
 
