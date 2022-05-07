@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -11,10 +13,9 @@ torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 # Multi-Head Attention
 class MGA(nn.Module):
-    def __init__(self, feat_dim, num_head, temperature):
+    def __init__(self, feat_dim, num_head):
         super(MGA, self).__init__()
         self.num_heads = num_head
-        self.temperature = temperature
         self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
 
     def forward(self, x):
@@ -25,7 +26,7 @@ class MGA(nn.Module):
         k = k.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
         q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
         # [N, H, L, L]
-        attn = torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / self.temperature, dim=-1)
+        attn = torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1)
 
         out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
         return x + out
@@ -88,8 +89,8 @@ class CO2(torch.nn.Module):
             nn.Conv1d(embed_dim, embed_dim, 3, padding=1), nn.LeakyReLU(0.2),
             nn.Dropout(0.7), nn.Conv1d(embed_dim, n_class + 1, 1))
 
-        self.rgb_atte = MGA(1024, args['opt'].num_head, args['opt'].temperature)
-        self.flow_atte = MGA(1024, args['opt'].num_head, args['opt'].temperature)
+        self.rgb_atte = MGA(1024, args['opt'].num_head)
+        self.flow_atte = MGA(1024, args['opt'].num_head)
 
         self.channel_avg = nn.AdaptiveAvgPool1d(1)
         self.batch_avg = nn.AdaptiveAvgPool1d(1)
@@ -257,8 +258,8 @@ class ANT_CO2(torch.nn.Module):
             nn.Conv1d(embed_dim, embed_dim, 3, padding=1), nn.LeakyReLU(0.2),
             nn.Dropout(0.7), nn.Conv1d(embed_dim, n_class + 1, 1))
 
-        self.rgb_atte = MGA(1024, args['opt'].num_head, args['opt'].temperature)
-        self.flow_atte = MGA(1024, args['opt'].num_head, args['opt'].temperature)
+        self.rgb_atte = MGA(1024, args['opt'].num_head)
+        self.flow_atte = MGA(1024, args['opt'].num_head)
 
         self.channel_avg = nn.AdaptiveAvgPool1d(1)
         self.batch_avg = nn.AdaptiveAvgPool1d(1)

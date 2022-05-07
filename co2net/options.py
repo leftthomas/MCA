@@ -48,6 +48,5 @@ parser.add_argument('--alpha4', type=float, default=1)
 
 parser.add_argument('--alpha5', type=float, default=1)
 parser.add_argument('--num_head', type=int, default=4)
-parser.add_argument('--temperature', type=float, default=0.07)
 
 parser.add_argument("--AWM", type=str, default='BWA_fusion_dropout_feat_v2')
