@@ -11,12 +11,13 @@ import model
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 
-# Multi-Head Attention
+# Multi-head Global Attention
 class MGA(nn.Module):
     def __init__(self, feat_dim, num_head):
         super(MGA, self).__init__()
         self.num_heads = num_head
         self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
+        self.drop = nn.Dropout(p=0.7)
 
     def forward(self, x):
         n, d, l = x.shape
@@ -26,10 +27,10 @@ class MGA(nn.Module):
         k = k.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
         q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
         # [N, H, L, L]
-        attn = torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1)
+        attn = self.drop(torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1))
 
         out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
-        return x + out
+        return x + F.gelu(out)
 
 
 def weights_init(m):

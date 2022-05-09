@@ -70,10 +70,10 @@ class CoLA(nn.Module):
         self.len_feature = cfg.FEATS_DIM
         self.num_classes = cfg.NUM_CLASSES
 
-        self.actionness_module = Actionness_Module(cfg.FEATS_DIM, cfg.NUM_CLASSES)
-
         self.rgb_atte = MGA(cfg.FEATS_DIM // 2, cfg.NUM_HEAD)
         self.flow_atte = MGA(cfg.FEATS_DIM // 2, cfg.NUM_HEAD)
+
+        self.actionness_module = Actionness_Module(cfg.FEATS_DIM, cfg.NUM_CLASSES)
 
         self.softmax = nn.Softmax(dim=1)
         self.softmax_2 = nn.Softmax(dim=2)
