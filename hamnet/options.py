@@ -55,4 +55,6 @@ def parse_args(parser=None):
                         help="whether to log to a file")
     parser.add_argument("--progress_refresh", type=int, default=20)
 
+    parser.add_argument('--num_head', type=int, default=4)
+
     return parser

@@ -1,14 +1,37 @@
 import argparse
+import math
 
-import data_loader
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import init_weights
 
+import data_loader
+from utils import init_weights
 from .tester import Tester
+
+
+# Multi-head Global Attention
+class MGA(nn.Module):
+    def __init__(self, feat_dim, num_head):
+        super(MGA, self).__init__()
+        self.num_heads = num_head
+        self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
+        self.drop = nn.Dropout(p=0.7)
+
+    def forward(self, x):
+        n, d, l = x.shape
+        k = self.k(x)
+        # [N, H, L, D/H]
+        q = x.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
+        k = k.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
+        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
+        # [N, H, L, L]
+        attn = self.drop(torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1))
+
+        out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
+        return x + F.gelu(out)
 
 
 # ---------------------------------------------------------------------------- #
@@ -261,6 +284,9 @@ class HAMNet(nn.Module):
         n_class = args.num_class
         n_feature = args.feature_size
 
+        self.rgb_atte = MGA(1024, args.num_head)
+        self.flow_atte = MGA(1024, args.num_head)
+
         self.classifier = nn.Sequential(
             nn.Conv1d(n_feature, n_feature, 3, padding=1), nn.LeakyReLU(0.2),
             nn.Conv1d(n_feature, n_feature, 3, padding=1), nn.LeakyReLU(0.2),
@@ -273,10 +299,15 @@ class HAMNet(nn.Module):
                                        nn.Sigmoid())
 
         self.adl = ADL(drop_thres=args.drop_thres, drop_prob=args.drop_prob)
+
         self.apply(init_weights)
 
     def forward(self, inputs, include_min=False):
-        x = inputs.transpose(-1, -2)
+        rgb, flow = inputs[:, :, :1024].transpose(-2, -1).contiguous(), inputs[:, :, 1024:].transpose(-2,
+                                                                                                      -1).contiguous()
+        rgb, flow = self.rgb_atte(rgb), self.flow_atte(flow)
+        x = torch.cat((rgb, flow), dim=1)
+
         x_cls = self.classifier(x)
         x_atn = self.attention(x)
 
