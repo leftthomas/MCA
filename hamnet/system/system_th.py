@@ -1,14 +1,14 @@
 import argparse
 import math
 
+import data_loader
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-import data_loader
 from utils import init_weights
+
 from .tester import Tester
 
 
@@ -59,7 +59,7 @@ class LightningSystem(pl.LightningModule):
         parser = argparse.ArgumentParser(parents=[parent_parser],
                                          conflict_handler="resolve")
         parser.add_argument("--model_name", type=str, default="thumos")
-        parser.add_argument("--rat", type=int, default=10, help="topk value")
+        parser.add_argument("--rat", type=int, default=7, help="topk value")
         parser.add_argument("--rat2",
                             type=int,
                             default=None,
@@ -67,7 +67,7 @@ class LightningSystem(pl.LightningModule):
 
         parser.add_argument("--beta", type=float, default=0.8)
         parser.add_argument("--alpha", type=float, default=0.8)
-        parser.add_argument("--num_segments", type=int, default=500)
+        parser.add_argument("--num_segments", type=int, default=750)
         parser.add_argument("--sampling", type=str, default="random")
         parser.add_argument('--class_thresh', type=float, default=0.2)
 
@@ -77,7 +77,7 @@ class LightningSystem(pl.LightningModule):
                             default="Thumos14reduced")
 
         parser.add_argument("--scale", type=int, default=1)
-        parser.add_argument("--lr", type=float, default=1e-5)
+        parser.add_argument("--lr", type=float, default=5e-5)
 
         parser.add_argument("--lm_1", type=float, default=1)
         parser.add_argument("--lm_2", type=float, default=1)
