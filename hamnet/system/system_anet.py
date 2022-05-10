@@ -282,9 +282,6 @@ class HAMNet(nn.Module):
         else:
             _kernel = None
 
-        self.rgb_atte = MGA(1024, args.num_head)
-        self.flow_atte = MGA(1024, args.num_head)
-
         self.classifier = nn.Sequential(
             nn.Conv1d(n_feature, n_feature, 3, padding=1), nn.LeakyReLU(0.2),
             nn.Conv1d(n_feature, n_feature, 3, padding=1), nn.LeakyReLU(0.2),
@@ -303,6 +300,9 @@ class HAMNet(nn.Module):
         self.adl = ADL(drop_thres=args.drop_thres, drop_prob=args.drop_prob)
 
         self.apply(init_weights)
+
+        self.rgb_atte = MGA(1024, args.num_head)
+        self.flow_atte = MGA(1024, args.num_head)
 
     def forward(self, inputs, include_min=False):
         rgb, flow = inputs[:, :, :1024].transpose(-2, -1).contiguous(), inputs[:, :, 1024:].transpose(-2,
