@@ -1,13 +1,13 @@
 import argparse
 import math
 
+import data_loader
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import data_loader
 from utils import init_weights
 from .tester import Tester
 
@@ -18,7 +18,7 @@ class MGA(nn.Module):
         super(MGA, self).__init__()
         self.num_heads = num_head
         self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
-        self.drop = nn.Dropout(p=0.5)
+        self.drop = nn.Dropout(p=0.7)
 
     def forward(self, x):
         n, d, l = x.shape
