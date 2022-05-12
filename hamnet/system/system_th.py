@@ -7,8 +7,8 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import init_weights
 
+from utils import init_weights
 from .tester import Tester
 
 
@@ -67,7 +67,7 @@ class LightningSystem(pl.LightningModule):
 
         parser.add_argument("--beta", type=float, default=0.8)
         parser.add_argument("--alpha", type=float, default=0.8)
-        parser.add_argument("--num_segments", type=int, default=750)
+        parser.add_argument("--num_segments", type=int, default=500)
         parser.add_argument("--sampling", type=str, default="random")
         parser.add_argument('--class_thresh', type=float, default=0.2)
 
