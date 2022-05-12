@@ -9,7 +9,7 @@ parser.add_argument('--pretrained-ckpt', default=None, help='ckpt for pretrained
 parser.add_argument('--feature-size', default=2048, help='size of feature (default: 2048)')
 parser.add_argument('--num-class', type=int, default=20, help='number of classes (default: )')
 parser.add_argument('--dataset-name', default='Thumos14reduced', help='dataset to train on (default: )')
-parser.add_argument('--max-seqlen', type=int, default=320,
+parser.add_argument('--max-seqlen', type=int, default=500,
                     help='maximum sequence length during training (default: 750)')
 parser.add_argument('--num-similar', default=3, type=int,
                     help='number of similar pairs in a batch of data  (default: 3)')
