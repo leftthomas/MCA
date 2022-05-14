@@ -30,7 +30,20 @@ class MGA(nn.Module):
         attn = self.drop(torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1))
 
         out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
-        return x + F.gelu(out)
+        return x + F.gelu(out), out
+
+
+def sim_loss(rgb, flow, num_head):
+    n, d, l = rgb.shape
+    # [N, H, L, D/H]
+    rgb = rgb.reshape(n, num_head, -1, l).transpose(-2, -1).contiguous()
+    flow = flow.reshape(n, num_head, -1, l).transpose(-2, -1).contiguous()
+    rgb, flow = F.normalize(rgb, dim=-1), F.normalize(flow, dim=-1)
+    # [N, H, L, L]
+    rgb_sim = torch.matmul(rgb, rgb.transpose(-2, -1).contiguous())
+    flow_sim = torch.matmul(flow, flow.transpose(-2, -1).contiguous())
+    loss = torch.mean(torch.sum((rgb_sim - flow_sim) ** 2, dim=[-1, -2]))
+    return loss
 
 
 def weights_init(m):
@@ -102,8 +115,9 @@ class CO2(torch.nn.Module):
     def forward(self, inputs, is_training=True, **args):
         feat = inputs.transpose(-1, -2)
         b, c, n = feat.size()
-        rgb, flow = feat[:, :1024, :], feat[:, 1024:, :]
-        rgb, flow = self.rgb_atte(rgb), self.flow_atte(flow)
+        o_rgb, o_flow = feat[:, :1024, :], feat[:, 1024:, :]
+        rgb, e_rgb = self.rgb_atte(o_rgb)
+        flow, e_flow = self.flow_atte(o_flow)
         v_atn, vfeat = self.vAttn(rgb, flow)
         f_atn, ffeat = self.fAttn(flow, rgb)
         x_atn = (f_atn + v_atn) / 2
@@ -112,7 +126,7 @@ class CO2(torch.nn.Module):
         x_cls = self.classifier(nfeat)
 
         return {'feat': nfeat.transpose(-1, -2), 'cas': x_cls.transpose(-1, -2), 'attn': x_atn.transpose(-1, -2),
-                'v_atn': v_atn.transpose(-1, -2), 'f_atn': f_atn.transpose(-1, -2)}
+                'v_atn': v_atn.transpose(-1, -2), 'f_atn': f_atn.transpose(-1, -2), 'rgb': e_rgb, 'flow': o_flow}
 
     def _multiply(self, x, atn, dim=-1, include_min=False):
         if include_min:
@@ -158,10 +172,13 @@ class CO2(torch.nn.Module):
         f_loss_guide = (1 - f_atn -
                         element_logits.softmax(-1)[..., [-1]]).abs().mean()
 
+        # atte loss
+        atte_loss = sim_loss(outputs['rgb'], outputs['flow'], args['opt'].num_head)
+
         # total loss
         total_loss = (loss_mil_orig.mean() + loss_mil_supp.mean() +
                       args['opt'].alpha3 * loss_3_supp_Contrastive +
-                      args['opt'].alpha4 * mutual_loss +
+                      args['opt'].alpha4 * mutual_loss + atte_loss +
                       args['opt'].alpha1 * (loss_norm + v_loss_norm + f_loss_norm) / 3 +
                       args['opt'].alpha2 * (loss_guide + v_loss_guide + f_loss_guide) / 3)
 
@@ -273,9 +290,9 @@ class ANT_CO2(torch.nn.Module):
     def forward(self, inputs, is_training=True, **args):
         feat = inputs.transpose(-1, -2)
         b, c, n = feat.size()
-
-        rgb, flow = feat[:, :1024, :], feat[:, 1024:, :]
-        rgb, flow = self.rgb_atte(rgb), self.flow_atte(flow)
+        o_rgb, o_flow = feat[:, :1024, :], feat[:, 1024:, :]
+        rgb, e_rgb = self.rgb_atte(o_rgb)
+        flow, e_flow = self.flow_atte(o_flow)
         v_atn, vfeat = self.vAttn(rgb, flow)
         f_atn, ffeat = self.fAttn(flow, rgb)
         x_atn = (f_atn + v_atn) / 2
@@ -288,7 +305,7 @@ class ANT_CO2(torch.nn.Module):
         v_atn = self.pool(v_atn)
 
         return {'feat': nfeat.transpose(-1, -2), 'cas': x_cls.transpose(-1, -2), 'attn': x_atn.transpose(-1, -2),
-                'v_atn': v_atn.transpose(-1, -2), 'f_atn': f_atn.transpose(-1, -2)}
+                'v_atn': v_atn.transpose(-1, -2), 'f_atn': f_atn.transpose(-1, -2), 'rgb': e_rgb, 'flow': o_flow}
 
     def _multiply(self, x, atn, dim=-1, include_min=False):
         if include_min:
@@ -334,9 +351,12 @@ class ANT_CO2(torch.nn.Module):
         f_loss_guide = (1 - f_atn -
                         element_logits.softmax(-1)[..., [-1]]).abs().mean()
 
+        # atte loss
+        atte_loss = sim_loss(outputs['rgb'], outputs['flow'], args['opt'].num_head)
+
         # total loss
         total_loss = (loss_mil_orig.mean() + loss_mil_supp.mean() + args[
-            'opt'].alpha3 * loss_3_supp_Contrastive + mutual_loss +
+            'opt'].alpha3 * loss_3_supp_Contrastive + mutual_loss + atte_loss +
                       args['opt'].alpha1 * (loss_norm + v_loss_norm + f_loss_norm) / 3 +
                       args['opt'].alpha2 * (loss_guide + v_loss_guide + f_loss_guide) / 3)
 
