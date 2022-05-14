@@ -31,7 +31,20 @@ class MGA(nn.Module):
         attn = self.drop(torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1))
 
         out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
-        return x + F.gelu(out)
+        return x + F.gelu(out), out
+
+
+def sim_loss(rgb, flow, num_head):
+    n, d, l = rgb.shape
+    # [N, H, L, D/H]
+    rgb = rgb.reshape(n, num_head, -1, l).transpose(-2, -1).contiguous()
+    flow = flow.reshape(n, num_head, -1, l).transpose(-2, -1).contiguous()
+    rgb, flow = F.normalize(rgb, dim=-1), F.normalize(flow, dim=-1)
+    # [N, H, L, L]
+    rgb_sim = torch.matmul(rgb, rgb.transpose(-2, -1).contiguous())
+    flow_sim = torch.matmul(flow, flow.transpose(-2, -1).contiguous())
+    loss = torch.mean(torch.sum((rgb_sim - flow_sim) ** 2, dim=[-1, -2]))
+    return loss
 
 
 # ---------------------------------------------------------------------------- #
@@ -170,7 +183,7 @@ class LightningSystem(pl.LightningModule):
         """ Total loss funtion """
         features, labels, segm, vid_name, _ = batch
 
-        element_logits, atn_supp, atn_drop, element_atn = self.net(features)
+        element_logits, atn_supp, atn_drop, element_atn, rgb, flow = self.net(features)
 
         element_logits_supp = self._multiply(element_logits, atn_supp)
 
@@ -215,18 +228,21 @@ class LightningSystem(pl.LightningModule):
                                       self.hparams.min_percent)].mean()
 
         # guide loss
-        loss_guide = (1 - element_atn -
-                      element_logits.softmax(-1)[..., [-1]]).abs().mean()
+        loss_guide = (1 - element_atn - element_logits.softmax(-1)[..., [-1]]).abs().mean()
+
+        # atte loss
+        atte_loss = sim_loss(rgb, flow, self.hparams.num_head)
 
         # total loss
         total_loss = (self.hparams.lm_1 * loss_1 + self.hparams.lm_2 * loss_2 +
-                      self.hparams.alpha * loss_norm +
+                      self.hparams.alpha * loss_norm + atte_loss +
                       self.hparams.beta * loss_guide)
         tqdm_dict = {
             "loss_train": total_loss,
             "loss_1": loss_1,
             "loss_2": loss_2,
             "loss_norm": loss_norm,
+            "loss_atte": atte_loss,
             "loss_guide": loss_guide,
         }
 
@@ -305,9 +321,10 @@ class HAMNet(nn.Module):
         self.flow_atte = MGA(1024, args.num_head)
 
     def forward(self, inputs, include_min=False):
-        rgb, flow = inputs[:, :, :1024].transpose(-2, -1).contiguous(), inputs[:, :, 1024:].transpose(-2,
-                                                                                                      -1).contiguous()
-        rgb, flow = self.rgb_atte(rgb), self.flow_atte(flow)
+        o_rgb = inputs[:, :, :1024].transpose(-2, -1).contiguous()
+        o_flow = inputs[:, :, 1024:].transpose(-2, -1).contiguous()
+        rgb, e_rgb = self.rgb_atte(o_rgb)
+        flow, e_flow = self.flow_atte(o_flow)
         x = torch.cat((rgb, flow), dim=1)
 
         x_cls = self.classifier(x)
@@ -316,7 +333,7 @@ class HAMNet(nn.Module):
         atn_supp, atn_drop = self.adl(x_cls, x_atn, include_min=include_min)
 
         return x_cls.transpose(-1, -2), atn_supp.transpose(
-            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2)
+            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), rgb, o_flow
 
 
 class ADL(nn.Module):
