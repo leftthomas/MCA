@@ -43,7 +43,7 @@ def sim_loss(rgb, flow, num_head):
     # [N, H, L, L]
     rgb_sim = torch.matmul(rgb, rgb.transpose(-2, -1).contiguous())
     flow_sim = torch.matmul(flow, flow.transpose(-2, -1).contiguous())
-    loss = torch.mean(torch.sum((rgb_sim - flow_sim) ** 2, dim=[-1, -2]))
+    loss = torch.mean(torch.abs(rgb_sim - flow_sim))
     return loss
 
 
