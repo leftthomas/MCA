@@ -333,7 +333,7 @@ class HAMNet(nn.Module):
         atn_supp, atn_drop = self.adl(x_cls, x_atn, include_min=include_min)
 
         return x_cls.transpose(-1, -2), atn_supp.transpose(
-            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), rgb, o_flow
+            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), e_rgb, o_flow
 
 
 class ADL(nn.Module):
