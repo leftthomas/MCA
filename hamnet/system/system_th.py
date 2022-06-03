@@ -1,50 +1,53 @@
 import argparse
 import math
 
-import data_loader
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import data_loader
 from utils import init_weights
 from .tester import Tester
 
 
-# Multi-head Global Attention
-class MGA(nn.Module):
+# Cross Modal Attention
+class CMA(nn.Module):
     def __init__(self, feat_dim, num_head):
-        super(MGA, self).__init__()
-        self.num_heads = num_head
-        self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
-        self.drop = nn.Dropout(p=0.7)
+        super(CMA, self).__init__()
+        self.rgb_linear = nn.Linear(feat_dim, feat_dim, bias=False)
+        self.flow_linear = nn.Linear(feat_dim, feat_dim, bias=False)
+        self.atte = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
+        nn.init.uniform_(self.atte, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
+        self.num_head = num_head
 
-    def forward(self, x):
-        n, d, l = x.shape
-        k = self.k(x)
+    def forward(self, rgb, flow):
+        n, l, d = rgb.shape
         # [N, H, L, D/H]
-        q = x.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
-        k = k.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
-        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
+        e_rgb = F.normalize(self.rgb_linear(rgb).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
+        e_flow = F.normalize(self.flow_linear(flow).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
         # [N, H, L, L]
-        attn = self.drop(torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1))
+        atte = torch.matmul(torch.matmul(e_rgb, self.atte), e_flow.transpose(-1, -2))
+        rgb_atte = torch.softmax(atte, dim=-1)
+        flow_atte = torch.softmax(atte.transpose(-1, -2), dim=-1)
+        # [N, L, D]
+        e_rgb = torch.tanh(torch.matmul(rgb_atte, e_rgb).transpose(1, 2).reshape(n, l, -1) + rgb)
+        e_flow = torch.tanh(torch.matmul(flow_atte, e_flow).transpose(1, 2).reshape(n, l, -1) + flow)
+        return e_rgb, e_flow, rgb_atte, flow_atte
 
-        out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
-        return x + F.gelu(out), out
 
-
-def sim_loss(rgb, flow, num_head):
-    n, d, l = rgb.shape
-    # [N, H, L, D/H]
-    rgb = rgb.reshape(n, num_head, -1, l).transpose(-2, -1).contiguous()
-    flow = flow.reshape(n, num_head, -1, l).transpose(-2, -1).contiguous()
-    rgb, flow = F.normalize(rgb, dim=-1), F.normalize(flow, dim=-1)
-    # [N, H, L, L]
-    rgb_sim = torch.matmul(rgb, rgb.transpose(-2, -1).contiguous())
-    flow_sim = torch.matmul(flow, flow.transpose(-2, -1).contiguous())
-    loss = torch.mean(torch.abs(rgb_sim - flow_sim))
+def diversity_loss(rgb_atte, flow_atte, num_head):
+    loss = 0.0
+    for i in range(num_head - 1):
+        for j in range(i + 1, num_head):
+            rgb_loss = F.cosine_similarity(rgb_atte[:, i, :, :], rgb_atte[:, j, :, :], dim=-1)
+            flow_loss = F.cosine_similarity(flow_atte[:, i, :, :], flow_atte[:, j, :, :], dim=-1)
+            loss = loss + rgb_loss + flow_loss
+    if num_head != 1:
+        loss = loss.mean().div(0.5 * num_head * (num_head - 1))
     return loss
+
 
 
 # ---------------------------------------------------------------------------- #
@@ -72,7 +75,7 @@ class LightningSystem(pl.LightningModule):
         parser = argparse.ArgumentParser(parents=[parent_parser],
                                          conflict_handler="resolve")
         parser.add_argument("--model_name", type=str, default="thumos")
-        parser.add_argument("--rat", type=int, default=7, help="topk value")
+        parser.add_argument("--rat", type=int, default=10, help="topk value")
         parser.add_argument("--rat2",
                             type=int,
                             default=None,
@@ -90,7 +93,7 @@ class LightningSystem(pl.LightningModule):
                             default="Thumos14reduced")
 
         parser.add_argument("--scale", type=int, default=1)
-        parser.add_argument("--lr", type=float, default=5e-5)
+        parser.add_argument("--lr", type=float, default=1e-5)
 
         parser.add_argument("--lm_1", type=float, default=1)
         parser.add_argument("--lm_2", type=float, default=1)
@@ -186,7 +189,7 @@ class LightningSystem(pl.LightningModule):
         """ Total loss funtion """
         features, labels, segm, vid_name, _ = batch
 
-        element_logits, atn_supp, atn_drop, element_atn, rgb, flow = self.net(features)
+        element_logits, atn_supp, atn_drop, element_atn, rgb_atte, flow_atte = self.net(features)
 
         element_logits_supp = self._multiply(element_logits, atn_supp)
 
@@ -234,22 +237,23 @@ class LightningSystem(pl.LightningModule):
         loss_norm = element_atn.mean()
 
         # guide loss
-        loss_guide = (1 - element_atn - element_logits.softmax(-1)[..., [-1]]).abs().mean()
+        loss_guide = (1 - element_atn -
+                      element_logits.softmax(-1)[..., [-1]]).abs().mean()
 
-        # atte loss
-        atte_loss = sim_loss(rgb, flow, self.hparams.num_head)
+        # diversity loss
+        loss_div = diversity_loss(rgb_atte, flow_atte, self.hparams.num_head)
 
         # total loss
         total_loss = (self.hparams.lm_1 * loss_1 + self.hparams.lm_2 * loss_2 +
-                      self.hparams.alpha * loss_norm + atte_loss +
+                      self.hparams.alpha * loss_norm + self.hparams.lamda * loss_div +
                       self.hparams.beta * loss_guide)
         tqdm_dict = {
             "loss_train": total_loss,
             "loss_1": loss_1,
             "loss_2": loss_2,
             "loss_norm": loss_norm,
-            "loss_atte": atte_loss,
             "loss_guide": loss_guide,
+            'loss_div': loss_div
         }
 
         return total_loss, tqdm_dict
@@ -312,18 +316,14 @@ class HAMNet(nn.Module):
                                        nn.Sigmoid())
 
         self.adl = ADL(drop_thres=args.drop_thres, drop_prob=args.drop_prob)
-
         self.apply(init_weights)
 
-        self.rgb_atte = MGA(1024, args.num_head)
-        self.flow_atte = MGA(1024, args.num_head)
+        self.mga = CMA(n_feature // 2, args.num_head)
 
     def forward(self, inputs, include_min=False):
-        o_rgb = inputs[:, :, :1024].transpose(-2, -1).contiguous()
-        o_flow = inputs[:, :, 1024:].transpose(-2, -1).contiguous()
-        rgb, e_rgb = self.rgb_atte(o_rgb)
-        flow, e_flow = self.flow_atte(o_flow)
-        x = torch.cat((rgb, flow), dim=1)
+        rgb, flow = inputs[:, :, :1024], inputs[:, :, 1024:]
+        rgb, flow, rgb_atte, flow_atte = self.mga(rgb, flow)
+        x = torch.cat((rgb, flow), dim=-1).transpose(-1, -2)
 
         x_cls = self.classifier(x)
         x_atn = self.attention(x)
@@ -331,7 +331,7 @@ class HAMNet(nn.Module):
         atn_supp, atn_drop = self.adl(x_cls, x_atn, include_min=include_min)
 
         return x_cls.transpose(-1, -2), atn_supp.transpose(
-            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), e_rgb, o_flow
+            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), rgb_atte, flow_atte
 
 
 class ADL(nn.Module):

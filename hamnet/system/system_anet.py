@@ -1,50 +1,14 @@
 import argparse
-import math
 
-import data_loader
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import data_loader
 from utils import init_weights
 from .tester import Tester
-
-
-# Multi-head Global Attention
-class MGA(nn.Module):
-    def __init__(self, feat_dim, num_head):
-        super(MGA, self).__init__()
-        self.num_heads = num_head
-        self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
-        self.drop = nn.Dropout(p=0.7)
-
-    def forward(self, x):
-        n, d, l = x.shape
-        k = self.k(x)
-        # [N, H, L, D/H]
-        q = x.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
-        k = k.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
-        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
-        # [N, H, L, L]
-        attn = self.drop(torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1))
-
-        out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
-        return x + F.gelu(out), out
-
-
-def sim_loss(rgb, flow, num_head):
-    n, d, l = rgb.shape
-    # [N, H, L, D/H]
-    rgb = rgb.reshape(n, num_head, -1, l).transpose(-2, -1).contiguous()
-    flow = flow.reshape(n, num_head, -1, l).transpose(-2, -1).contiguous()
-    rgb, flow = F.normalize(rgb, dim=-1), F.normalize(flow, dim=-1)
-    # [N, H, L, L]
-    rgb_sim = torch.matmul(rgb, rgb.transpose(-2, -1).contiguous())
-    flow_sim = torch.matmul(flow, flow.transpose(-2, -1).contiguous())
-    loss = torch.mean(torch.abs(rgb_sim - flow_sim))
-    return loss
 
 
 # ---------------------------------------------------------------------------- #
@@ -183,7 +147,7 @@ class LightningSystem(pl.LightningModule):
         """ Total loss funtion """
         features, labels, segm, vid_name, _ = batch
 
-        element_logits, atn_supp, atn_drop, element_atn, rgb, flow = self.net(features)
+        element_logits, atn_supp, atn_drop, element_atn, _, _ = self.net(features)
 
         element_logits_supp = self._multiply(element_logits, atn_supp)
 
@@ -228,21 +192,18 @@ class LightningSystem(pl.LightningModule):
                                       self.hparams.min_percent)].mean()
 
         # guide loss
-        loss_guide = (1 - element_atn - element_logits.softmax(-1)[..., [-1]]).abs().mean()
-
-        # atte loss
-        atte_loss = sim_loss(rgb, flow, self.hparams.num_head)
+        loss_guide = (1 - element_atn -
+                      element_logits.softmax(-1)[..., [-1]]).abs().mean()
 
         # total loss
         total_loss = (self.hparams.lm_1 * loss_1 + self.hparams.lm_2 * loss_2 +
-                      self.hparams.alpha * loss_norm + atte_loss +
+                      self.hparams.alpha * loss_norm +
                       self.hparams.beta * loss_guide)
         tqdm_dict = {
             "loss_train": total_loss,
             "loss_1": loss_1,
             "loss_2": loss_2,
             "loss_norm": loss_norm,
-            "loss_atte": atte_loss,
             "loss_guide": loss_guide,
         }
 
@@ -314,26 +275,17 @@ class HAMNet(nn.Module):
                 _kernel, 1, padding=_kernel // 2, count_include_pad=True)
                            if _kernel is not None else nn.Identity()))
         self.adl = ADL(drop_thres=args.drop_thres, drop_prob=args.drop_prob)
-
         self.apply(init_weights)
 
-        self.rgb_atte = MGA(1024, args.num_head)
-        self.flow_atte = MGA(1024, args.num_head)
-
     def forward(self, inputs, include_min=False):
-        o_rgb = inputs[:, :, :1024].transpose(-2, -1).contiguous()
-        o_flow = inputs[:, :, 1024:].transpose(-2, -1).contiguous()
-        rgb, e_rgb = self.rgb_atte(o_rgb)
-        flow, e_flow = self.flow_atte(o_flow)
-        x = torch.cat((rgb, flow), dim=1)
-
+        x = inputs.transpose(-1, -2)
         x_cls = self.classifier(x)
         x_atn = self.attention(x)
 
         atn_supp, atn_drop = self.adl(x_cls, x_atn, include_min=include_min)
 
         return x_cls.transpose(-1, -2), atn_supp.transpose(
-            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), e_rgb, o_flow
+            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), atn_supp, atn_supp
 
 
 class ADL(nn.Module):

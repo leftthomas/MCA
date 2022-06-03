@@ -55,6 +55,6 @@ def parse_args(parser=None):
                         help="whether to log to a file")
     parser.add_argument("--progress_refresh", type=int, default=20)
 
-    parser.add_argument('--num_head', type=int, default=4)
-
+    parser.add_argument('--num_head', type=int, default=4, help='number of head for attention')
+    parser.add_argument('--lamda', type=float, default=100, help='weight for diversity loss')
     return parser
