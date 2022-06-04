@@ -25,24 +25,24 @@ class CMA(nn.Module):
     def forward(self, rgb, flow):
         n, l, d = rgb.shape
         # [N, H, L, D/H]
-        e_rgb = F.normalize(self.rgb_linear(rgb).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
-        e_flow = F.normalize(self.flow_linear(flow).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
+        o_rgb = F.normalize(self.rgb_linear(rgb).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
+        o_flow = F.normalize(self.flow_linear(flow).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
         # [N, H, L, L]
-        atte = torch.matmul(torch.matmul(e_rgb, self.atte), e_flow.transpose(-1, -2))
+        atte = torch.matmul(torch.matmul(o_rgb, self.atte), o_flow.transpose(-1, -2))
         rgb_atte = torch.softmax(atte, dim=-1)
         flow_atte = torch.softmax(atte.transpose(-1, -2), dim=-1)
         # [N, L, D]
-        e_rgb = torch.tanh(torch.matmul(rgb_atte, e_rgb).transpose(1, 2).reshape(n, l, -1) + rgb)
-        e_flow = torch.tanh(torch.matmul(flow_atte, e_flow).transpose(1, 2).reshape(n, l, -1) + flow)
-        return e_rgb, e_flow, rgb_atte, flow_atte
+        e_rgb = torch.tanh(torch.matmul(rgb_atte, o_rgb).transpose(1, 2).reshape(n, l, -1) + rgb)
+        e_flow = torch.tanh(torch.matmul(flow_atte, o_flow).transpose(1, 2).reshape(n, l, -1) + flow)
+        return e_rgb, e_flow, o_rgb, o_flow
 
 
-def diversity_loss(rgb_atte, flow_atte, num_head):
+def diversity_loss(rgb, flow, num_head):
     loss = 0.0
     for i in range(num_head - 1):
         for j in range(i + 1, num_head):
-            rgb_loss = F.cosine_similarity(rgb_atte[:, i, :, :], rgb_atte[:, j, :, :], dim=-1)
-            flow_loss = F.cosine_similarity(flow_atte[:, i, :, :], flow_atte[:, j, :, :], dim=-1)
+            rgb_loss = torch.sum(rgb[:, i, :, :] * rgb[:, j, :, :], dim=-1).add(1.0).div(2)
+            flow_loss = torch.sum(flow[:, i, :, :] * flow[:, j, :, :], dim=-1).add(1.0).div(2)
             loss = loss + rgb_loss + flow_loss
     if num_head != 1:
         loss = loss.mean().div(0.5 * num_head * (num_head - 1))
@@ -117,7 +117,7 @@ class LightningSystem(pl.LightningModule):
         parser.add_argument("--rand", type=str, default='false')
         parser.add_argument("--max_epochs", type=int, default=100)
         parser.add_argument('--num_head', type=int, default=4, help='number of head for attention')
-        parser.add_argument('--lamda', type=float, default=100, help='weight for diversity loss')
+        parser.add_argument('--lamda', type=float, default=2, help='weight for diversity loss')
         return parser
 
     # --------------------------------- load data -------------------------------- #
@@ -191,7 +191,7 @@ class LightningSystem(pl.LightningModule):
         """ Total loss funtion """
         features, labels, segm, vid_name, _ = batch
 
-        element_logits, atn_supp, atn_drop, element_atn, rgb_atte, flow_atte = self.net(features)
+        element_logits, atn_supp, atn_drop, element_atn, o_rgb, o_flow = self.net(features)
 
         element_logits_supp = self._multiply(element_logits, atn_supp)
 
@@ -243,7 +243,7 @@ class LightningSystem(pl.LightningModule):
                       element_logits.softmax(-1)[..., [-1]]).abs().mean()
 
         # diversity loss
-        loss_div = diversity_loss(rgb_atte, flow_atte, self.hparams.num_head)
+        loss_div = diversity_loss(o_rgb, o_flow, self.hparams.num_head)
 
         # total loss
         total_loss = (self.hparams.lm_1 * loss_1 + self.hparams.lm_2 * loss_2 +
@@ -324,7 +324,7 @@ class HAMNet(nn.Module):
 
     def forward(self, inputs, include_min=False):
         rgb, flow = inputs[:, :, :1024], inputs[:, :, 1024:]
-        rgb, flow, rgb_atte, flow_atte = self.mga(rgb, flow)
+        rgb, flow, o_rgb, o_flow = self.mga(rgb, flow)
         x = torch.cat((rgb, flow), dim=-1).transpose(-1, -2)
 
         x_cls = self.classifier(x)
@@ -333,7 +333,7 @@ class HAMNet(nn.Module):
         atn_supp, atn_drop = self.adl(x_cls, x_atn, include_min=include_min)
 
         return x_cls.transpose(-1, -2), atn_supp.transpose(
-            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), rgb_atte, flow_atte
+            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), o_rgb, o_flow
 
 
 class ADL(nn.Module):
