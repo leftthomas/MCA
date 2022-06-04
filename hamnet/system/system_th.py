@@ -116,6 +116,8 @@ class LightningSystem(pl.LightningModule):
                             default=[0.1, 0.9, 10])
         parser.add_argument("--rand", type=str, default='false')
         parser.add_argument("--max_epochs", type=int, default=100)
+        parser.add_argument('--num_head', type=int, default=4, help='number of head for attention')
+        parser.add_argument('--lamda', type=float, default=100, help='weight for diversity loss')
         return parser
 
     # --------------------------------- load data -------------------------------- #
