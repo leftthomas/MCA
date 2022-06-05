@@ -3,35 +3,10 @@
 # [Author] - Can Zhang*, Meng Cao, Dongming Yang, Jie Chen and Yuexian Zou
 # [Github] - https://github.com/zhang-can/CoLA
 
-import math
-
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from scipy import ndimage
-
-
-# Multi-head Global Attention
-class MGA(nn.Module):
-    def __init__(self, feat_dim, num_head):
-        super(MGA, self).__init__()
-        self.num_heads = num_head
-        self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
-        self.drop = nn.Dropout(p=0.7)
-
-    def forward(self, x):
-        n, d, l = x.shape
-        k = self.k(x)
-        # [N, H, L, D/H]
-        q = x.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
-        k = k.reshape(n, self.num_heads, -1, l).transpose(-2, -1).contiguous()
-        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
-        # [N, H, L, L]
-        attn = self.drop(torch.softmax(torch.matmul(q, k.transpose(-2, -1).contiguous()) / math.sqrt(l), dim=-1))
-
-        out = torch.matmul(attn, q).transpose(-2, -1).contiguous().reshape(n, -1, l)
-        return x + F.gelu(out)
 
 
 # (a) Feature Embedding and (b) Actionness Modeling
@@ -69,9 +44,6 @@ class CoLA(nn.Module):
         super(CoLA, self).__init__()
         self.len_feature = cfg.FEATS_DIM
         self.num_classes = cfg.NUM_CLASSES
-
-        self.rgb_atte = MGA(cfg.FEATS_DIM // 2, cfg.NUM_HEAD)
-        self.flow_atte = MGA(cfg.FEATS_DIM // 2, cfg.NUM_HEAD)
 
         self.actionness_module = Actionness_Module(cfg.FEATS_DIM, cfg.NUM_CLASSES)
 
@@ -135,10 +107,6 @@ class CoLA(nn.Module):
         num_segments = x.shape[1]
         k_easy = num_segments // self.r_easy
         k_hard = num_segments // self.r_hard
-
-        rgb, flow = x[:, :, :1024].transpose(-2, -1).contiguous(), x[:, :, 1024:].transpose(-2, -1).contiguous()
-        rgb, flow = self.rgb_atte(rgb), self.flow_atte(flow)
-        x = torch.cat((rgb, flow), dim=1).transpose(-2, -1).contiguous()
 
         embeddings, cas, actionness = self.actionness_module(x)
 
