@@ -3,10 +3,38 @@
 # [Author] - Can Zhang*, Meng Cao, Dongming Yang, Jie Chen and Yuexian Zou
 # [Github] - https://github.com/zhang-can/CoLA
 
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from scipy import ndimage
+
+
+# Cross Modal Attention
+class CMA(nn.Module):
+    def __init__(self, feat_dim, num_head):
+        super(CMA, self).__init__()
+        self.rgb_linear = nn.Linear(feat_dim, feat_dim, bias=False)
+        self.flow_linear = nn.Linear(feat_dim, feat_dim, bias=False)
+        self.atte = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
+        nn.init.uniform_(self.atte, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
+        self.num_head = num_head
+
+    def forward(self, rgb, flow):
+        n, l, d = rgb.shape
+        # [N, H, L, D/H]
+        o_rgb = F.normalize(self.rgb_linear(rgb).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
+        o_flow = F.normalize(self.flow_linear(flow).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
+        # [N, H, L, L]
+        atte = torch.matmul(torch.matmul(o_rgb, self.atte), o_flow.transpose(-1, -2))
+        rgb_atte = torch.softmax(atte, dim=-1)
+        flow_atte = torch.softmax(atte.transpose(-1, -2), dim=-1)
+        # [N, L, D]
+        e_rgb = torch.tanh(torch.matmul(rgb_atte, o_rgb).transpose(1, 2).reshape(n, l, -1) + rgb)
+        e_flow = torch.tanh(torch.matmul(flow_atte, o_flow).transpose(1, 2).reshape(n, l, -1) + flow)
+        return e_rgb, e_flow, o_rgb, o_flow
 
 
 # (a) Feature Embedding and (b) Actionness Modeling
@@ -56,6 +84,10 @@ class CoLA(nn.Module):
         self.M = cfg.M
 
         self.dropout = nn.Dropout(p=0.6)
+
+        self.mga = CMA(cfg.FEATS_DIM // 2, cfg.NUM_HEAD)
+        self.num_head = cfg.NUM_HEAD
+        self.lamda = cfg.LAMDA
 
     def select_topk_embeddings(self, scores, embeddings, k):
         _, idx_DESC = scores.sort(descending=True, dim=1)
@@ -108,6 +140,10 @@ class CoLA(nn.Module):
         k_easy = num_segments // self.r_easy
         k_hard = num_segments // self.r_hard
 
+        rgb, flow = x[:, :, :1024], x[:, :, 1024:]
+        rgb, flow, o_rgb, o_flow = self.mga(rgb, flow)
+        x = torch.cat((rgb, flow), dim=-1)
+
         embeddings, cas, actionness = self.actionness_module(x)
 
         easy_act, easy_bkg = self.easy_snippets_mining(actionness, embeddings, k_easy)
@@ -119,7 +155,11 @@ class CoLA(nn.Module):
             'EA': easy_act,
             'EB': easy_bkg,
             'HA': hard_act,
-            'HB': hard_bkg
+            'HB': hard_bkg,
+            'RGB': o_rgb,
+            'FLOW': o_flow,
+            'NUM_HEAD': self.num_head,
+            'LAMDA': self.lamda
         }
 
         return video_scores, contrast_pairs, actionness, cas
