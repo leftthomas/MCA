@@ -1,5 +1,4 @@
 import argparse
-import math
 
 import numpy as np
 import pytorch_lightning as pl
@@ -12,37 +11,34 @@ from utils import init_weights
 from .tester import Tester
 
 
-# Cross Modal Attention
-class CMA(nn.Module):
+# Multi-head Global Attention
+class MGA(nn.Module):
     def __init__(self, feat_dim, num_head):
-        super(CMA, self).__init__()
-        self.rgb_linear = nn.Linear(feat_dim, feat_dim, bias=False)
-        self.flow_linear = nn.Linear(feat_dim, feat_dim, bias=False)
-        self.atte = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
-        nn.init.uniform_(self.atte, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
-        self.num_head = num_head
+        super(MGA, self).__init__()
+        self.num_heads = num_head
+        self.k = nn.Conv1d(feat_dim, feat_dim, kernel_size=1)
+        self.drop = nn.Dropout(p=0.5)
 
-    def forward(self, rgb, flow):
-        n, l, d = rgb.shape
+    def forward(self, x):
+        n, d, l = x.shape
+        k = self.k(x)
         # [N, H, L, D/H]
-        o_rgb = F.normalize(self.rgb_linear(rgb).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
-        o_flow = F.normalize(self.flow_linear(flow).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
+        q = x.reshape(n, self.num_heads, -1, l).transpose(-2, -1)
+        k = k.reshape(n, self.num_heads, -1, l).transpose(-2, -1)
+        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
         # [N, H, L, L]
-        atte = torch.matmul(torch.matmul(o_rgb, self.atte), o_flow.transpose(-1, -2))
-        rgb_atte = torch.softmax(atte, dim=-1)
-        flow_atte = torch.softmax(atte.transpose(-1, -2), dim=-1)
-        # [N, L, D]
-        e_rgb = torch.tanh(torch.matmul(rgb_atte, o_rgb).transpose(1, 2).reshape(n, l, -1) + rgb)
-        e_flow = torch.tanh(torch.matmul(flow_atte, o_flow).transpose(1, 2).reshape(n, l, -1) + flow)
-        return e_rgb, e_flow, o_rgb, o_flow
+        attn = self.drop(torch.softmax(torch.matmul(q, k.transpose(-2, -1)), dim=-1))
+        # [N, D, L]
+        out = torch.matmul(attn, q).transpose(-2, -1).reshape(n, -1, l)
+        return x + F.gelu(out), attn
 
 
-def diversity_loss(rgb, flow, num_head):
+def diversity_loss(rgb_atte, flow_atte, num_head):
     loss = 0.0
     for i in range(num_head - 1):
         for j in range(i + 1, num_head):
-            rgb_loss = torch.sum(rgb[:, i, :, :] * rgb[:, j, :, :], dim=-1).add(1.0).div(2)
-            flow_loss = torch.sum(flow[:, i, :, :] * flow[:, j, :, :], dim=-1).add(1.0).div(2)
+            rgb_loss = F.cosine_similarity(rgb_atte[:, i, :, :], rgb_atte[:, j, :, :], dim=-1)
+            flow_loss = F.cosine_similarity(flow_atte[:, i, :, :], flow_atte[:, j, :, :], dim=-1)
             loss = loss + rgb_loss + flow_loss
     if num_head != 1:
         loss = loss.mean().div(0.5 * num_head * (num_head - 1))
@@ -191,7 +187,7 @@ class LightningSystem(pl.LightningModule):
         """ Total loss funtion """
         features, labels, segm, vid_name, _ = batch
 
-        element_logits, atn_supp, atn_drop, element_atn, o_rgb, o_flow = self.net(features)
+        element_logits, atn_supp, atn_drop, element_atn, rgb_atte, flow_atte = self.net(features)
 
         element_logits_supp = self._multiply(element_logits, atn_supp)
 
@@ -243,7 +239,7 @@ class LightningSystem(pl.LightningModule):
                       element_logits.softmax(-1)[..., [-1]]).abs().mean()
 
         # diversity loss
-        loss_div = diversity_loss(o_rgb, o_flow, self.hparams.num_head)
+        loss_div = diversity_loss(rgb_atte, flow_atte, self.hparams.num_head)
 
         # total loss
         total_loss = (self.hparams.lm_1 * loss_1 + self.hparams.lm_2 * loss_2 +
@@ -320,12 +316,14 @@ class HAMNet(nn.Module):
         self.adl = ADL(drop_thres=args.drop_thres, drop_prob=args.drop_prob)
         self.apply(init_weights)
 
-        self.mga = CMA(n_feature // 2, args.num_head)
+        self.rgb_mga = MGA(n_feature // 2, args.num_head)
+        self.flow_mga = MGA(n_feature // 2, args.num_head)
 
     def forward(self, inputs, include_min=False):
         rgb, flow = inputs[:, :, :1024], inputs[:, :, 1024:]
-        rgb, flow, o_rgb, o_flow = self.mga(rgb, flow)
-        x = torch.cat((rgb, flow), dim=-1).transpose(-1, -2)
+        rgb, rgb_atte = self.rgb_mga(rgb.transpose(-1, -2))
+        flow, flow_atte = self.flow_mga(flow.transpose(-1, -2))
+        x = torch.cat((rgb, flow), dim=1)
 
         x_cls = self.classifier(x)
         x_atn = self.attention(x)
@@ -333,7 +331,7 @@ class HAMNet(nn.Module):
         atn_supp, atn_drop = self.adl(x_cls, x_atn, include_min=include_min)
 
         return x_cls.transpose(-1, -2), atn_supp.transpose(
-            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), o_rgb, o_flow
+            -1, -2), atn_drop.transpose(-1, -2), x_atn.transpose(-1, -2), rgb_atte, flow_atte
 
 
 class ADL(nn.Module):
