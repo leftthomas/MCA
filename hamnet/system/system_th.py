@@ -12,50 +12,55 @@ from utils import init_weights
 from .tester import Tester
 
 
-# Multi-head Cross Modal Attention
-class CMA(nn.Module):
+# Multi-head Attention
+class MHA(nn.Module):
     def __init__(self, feat_dim, num_head):
-        super(CMA, self).__init__()
-        self.rgb_proj = nn.Linear(feat_dim, feat_dim, bias=False)
-        self.flow_proj = nn.Linear(feat_dim, feat_dim, bias=False)
+        super(MHA, self).__init__()
+        self.rgb_proj = nn.Parameter(torch.empty(num_head, feat_dim, feat_dim // num_head))
+        self.flow_proj = nn.Parameter(torch.empty(num_head, feat_dim, feat_dim // num_head))
         self.atte = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
+        self.rgb_tra = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
+        self.flow_tra = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
+
+        nn.init.uniform_(self.rgb_proj, -math.sqrt(feat_dim), math.sqrt(feat_dim))
+        nn.init.uniform_(self.flow_proj, -math.sqrt(feat_dim), math.sqrt(feat_dim))
         nn.init.uniform_(self.atte, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
+        nn.init.uniform_(self.rgb_tra, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
+        nn.init.uniform_(self.flow_tra, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
         self.num_head = num_head
 
     def forward(self, rgb, flow):
         n, l, d = rgb.shape
+        # --- Cross Modal Attention --- #
         # [N, H, L, D/H]
-        o_rgb = F.normalize(self.rgb_proj(rgb).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
-        o_flow = F.normalize(self.flow_proj(flow).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
+        o_rgb = F.normalize(torch.matmul(rgb.unsqueeze(dim=1), self.rgb_proj), dim=-1)
+        o_flow = F.normalize(torch.matmul(flow.unsqueeze(dim=1), self.flow_proj), dim=-1)
         # [N, H, L, L]
         atte = torch.matmul(torch.matmul(o_rgb, self.atte), o_flow.transpose(-1, -2))
         rgb_atte = torch.softmax(atte, dim=-1)
         flow_atte = torch.softmax(atte.transpose(-1, -2), dim=-1)
-        # [N, L, D]
-        e_rgb = torch.tanh(torch.matmul(rgb_atte, o_rgb).transpose(1, 2).reshape(n, l, -1) + rgb)
-        e_flow = torch.tanh(torch.matmul(flow_atte, o_flow).transpose(1, 2).reshape(n, l, -1) + flow)
-        return e_rgb, e_flow
 
-
-# Multi-head Global Relation Attention
-class GRA(nn.Module):
-    def __init__(self, feat_dim, num_head):
-        super(GRA, self).__init__()
-        self.num_heads = num_head
-        self.k = nn.Linear(feat_dim, feat_dim)
-
-    def forward(self, x):
-        n, l, d = x.shape
-        k = self.k(x)
         # [N, H, L, D/H]
-        q = x.reshape(n, l, self.num_heads, -1).permute(0, 2, 1, 3)
-        k = k.reshape(n, l, self.num_heads, -1).permute(0, 2, 1, 3)
-        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
+        e_rgb = F.gelu(torch.matmul(rgb_atte, o_rgb))
+        e_flow = F.gelu(torch.matmul(flow_atte, o_flow))
+        # --- Cross Modal Attention --- #
+
+        # --- Global Relation Attention --- #
+        # [N, H, L, D/H]
+        r_rgb = F.normalize(torch.matmul(e_rgb, self.rgb_tra), dim=-1)
+        r_flow = F.normalize(torch.matmul(e_flow, self.flow_tra), dim=-1)
         # [N, H, L, L]
-        attn = torch.softmax(torch.matmul(q, k.transpose(-2, -1)), dim=-1)
+        rgb_atte = torch.softmax(torch.matmul(r_rgb, r_rgb.transpose(-2, -1)), dim=-1)
+        flow_atte = torch.softmax(torch.matmul(r_flow, r_flow.transpose(-2, -1)), dim=-1)
+        # [N, H, L, D/H]
+        g_rgb = F.gelu(torch.matmul(rgb_atte, r_rgb))
+        g_flow = F.gelu(torch.matmul(flow_atte, r_flow))
+        # --- Global Relation Attention --- #
+
         # [N, L, D]
-        out = torch.matmul(attn, q).transpose(-2, -1).reshape(n, -1, l).transpose(-2, -1)
-        return x + F.gelu(out)
+        f_rgb = torch.tanh(e_rgb.transpose(1, 2).reshape(n, l, -1) + g_rgb.transpose(1, 2).reshape(n, l, -1) + rgb)
+        f_flow = torch.tanh(e_flow.transpose(1, 2).reshape(n, l, -1) + g_flow.transpose(1, 2).reshape(n, l, -1) + flow)
+        return f_rgb, f_flow
 
 
 # ---------------------------------------------------------------------------- #
@@ -323,15 +328,11 @@ class HAMNet(nn.Module):
         self.adl = ADL(drop_thres=args.drop_thres, drop_prob=args.drop_prob)
         self.apply(init_weights)
 
-        self.rgb_gra = GRA(n_feature // 2, args.num_head)
-        self.flow_gra = GRA(n_feature // 2, args.num_head)
-        self.cma = CMA(n_feature // 2, args.num_head)
+        self.mha = MHA(n_feature // 2, args.num_head)
 
     def forward(self, inputs, include_min=False):
         rgb, flow = inputs[:, :, :1024], inputs[:, :, 1024:]
-        rgb = self.rgb_gra(rgb)
-        flow = self.flow_gra(flow)
-        rgb, flow = self.cma(rgb, flow)
+        rgb, flow = self.mha(rgb, flow)
         x = torch.cat((rgb, flow), dim=-1).transpose(-2, -1)
 
         x_cls = self.classifier(x)

@@ -146,13 +146,13 @@ class CO2(torch.nn.Module):
         loss_mil_orig, _ = self.topkloss(element_logits,
                                          labels,
                                          is_back=True,
-                                         rat=args['opt'].k,
+                                         rat=args['opt'].rgb_tra,
                                          reduce=None)
         # SAL
         loss_mil_supp, _ = self.topkloss(element_logits_supp,
                                          labels,
                                          is_back=False,
-                                         rat=args['opt'].k,
+                                         rat=args['opt'].rgb_tra,
                                          reduce=None)
 
         loss_3_supp_Contrastive = self.Contrastive(feat, element_logits_supp, labels, is_back=False)
@@ -325,13 +325,13 @@ class ANT_CO2(torch.nn.Module):
         loss_mil_orig, _ = self.topkloss(element_logits,
                                          labels,
                                          is_back=True,
-                                         rat=args['opt'].k,
+                                         rat=args['opt'].rgb_tra,
                                          reduce=None)
         # SAL
         loss_mil_supp, _ = self.topkloss(element_logits_supp,
                                          labels,
                                          is_back=False,
-                                         rat=args['opt'].k,
+                                         rat=args['opt'].rgb_tra,
                                          reduce=None)
 
         loss_3_supp_Contrastive = self.Contrastive(feat, element_logits_supp, labels, is_back=False)
