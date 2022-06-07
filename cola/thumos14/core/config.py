@@ -38,7 +38,6 @@ cfg.FEATS_FPS = 25
 cfg.NUM_SEGMENTS = 750
 
 cfg.NUM_HEAD = 4
-cfg.LAMDA = 1.0
 
 cfg.CLASS_DICT = {'BaseballPitch': 0, 'BasketballDunk': 1, 'Billiards': 2,
                   'CleanAndJerk': 3, 'CliffDiving': 4, 'CricketBowling': 5,

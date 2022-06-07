@@ -12,29 +12,55 @@ import torch.nn.functional as F
 from scipy import ndimage
 
 
-# Cross Modal Attention
-class CMA(nn.Module):
+# Multi-head Attention
+class MHA(nn.Module):
     def __init__(self, feat_dim, num_head):
-        super(CMA, self).__init__()
-        self.rgb_linear = nn.Linear(feat_dim, feat_dim, bias=False)
-        self.flow_linear = nn.Linear(feat_dim, feat_dim, bias=False)
+        super(MHA, self).__init__()
+        self.rgb_proj = nn.Parameter(torch.empty(num_head, feat_dim, feat_dim // num_head))
+        self.flow_proj = nn.Parameter(torch.empty(num_head, feat_dim, feat_dim // num_head))
         self.atte = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
+        self.rgb_tra = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
+        self.flow_tra = nn.Parameter(torch.empty(num_head, feat_dim // num_head, feat_dim // num_head))
+
+        nn.init.uniform_(self.rgb_proj, -math.sqrt(feat_dim), math.sqrt(feat_dim))
+        nn.init.uniform_(self.flow_proj, -math.sqrt(feat_dim), math.sqrt(feat_dim))
         nn.init.uniform_(self.atte, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
+        nn.init.uniform_(self.rgb_tra, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
+        nn.init.uniform_(self.flow_tra, -math.sqrt(feat_dim // num_head), math.sqrt(feat_dim // num_head))
         self.num_head = num_head
 
     def forward(self, rgb, flow):
         n, l, d = rgb.shape
+        # --- Cross Modal Attention --- #
         # [N, H, L, D/H]
-        o_rgb = F.normalize(self.rgb_linear(rgb).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
-        o_flow = F.normalize(self.flow_linear(flow).reshape(n, l, self.num_head, -1).transpose(1, 2), dim=-1)
+        o_rgb = F.normalize(torch.matmul(rgb.unsqueeze(dim=1), self.rgb_proj), dim=-1)
+        o_flow = F.normalize(torch.matmul(flow.unsqueeze(dim=1), self.flow_proj), dim=-1)
         # [N, H, L, L]
         atte = torch.matmul(torch.matmul(o_rgb, self.atte), o_flow.transpose(-1, -2))
         rgb_atte = torch.softmax(atte, dim=-1)
         flow_atte = torch.softmax(atte.transpose(-1, -2), dim=-1)
+
+        # [N, H, L, D/H]
+        e_rgb = F.gelu(torch.matmul(rgb_atte, o_rgb))
+        e_flow = F.gelu(torch.matmul(flow_atte, o_flow))
+        # --- Cross Modal Attention --- #
+
+        # --- Global Relation Attention --- #
+        # [N, H, L, D/H]
+        r_rgb = F.normalize(torch.matmul(e_rgb, self.rgb_tra), dim=-1)
+        r_flow = F.normalize(torch.matmul(e_flow, self.flow_tra), dim=-1)
+        # [N, H, L, L]
+        rgb_atte = torch.softmax(torch.matmul(r_rgb, r_rgb.transpose(-2, -1)), dim=-1)
+        flow_atte = torch.softmax(torch.matmul(r_flow, r_flow.transpose(-2, -1)), dim=-1)
+        # [N, H, L, D/H]
+        g_rgb = F.gelu(torch.matmul(rgb_atte, r_rgb))
+        g_flow = F.gelu(torch.matmul(flow_atte, r_flow))
+        # --- Global Relation Attention --- #
+
         # [N, L, D]
-        e_rgb = torch.tanh(torch.matmul(rgb_atte, o_rgb).transpose(1, 2).reshape(n, l, -1) + rgb)
-        e_flow = torch.tanh(torch.matmul(flow_atte, o_flow).transpose(1, 2).reshape(n, l, -1) + flow)
-        return e_rgb, e_flow, o_rgb, o_flow
+        f_rgb = torch.tanh(e_rgb.transpose(1, 2).reshape(n, l, -1) + g_rgb.transpose(1, 2).reshape(n, l, -1) + rgb)
+        f_flow = torch.tanh(e_flow.transpose(1, 2).reshape(n, l, -1) + g_flow.transpose(1, 2).reshape(n, l, -1) + flow)
+        return f_rgb, f_flow
 
 
 # (a) Feature Embedding and (b) Actionness Modeling
@@ -85,9 +111,7 @@ class CoLA(nn.Module):
 
         self.dropout = nn.Dropout(p=0.6)
 
-        self.mga = CMA(cfg.FEATS_DIM // 2, cfg.NUM_HEAD)
-        self.num_head = cfg.NUM_HEAD
-        self.lamda = cfg.LAMDA
+        self.mha = MHA(cfg.FEATS_DIM // 2, cfg.NUM_HEAD)
 
     def select_topk_embeddings(self, scores, embeddings, k):
         _, idx_DESC = scores.sort(descending=True, dim=1)
@@ -141,7 +165,7 @@ class CoLA(nn.Module):
         k_hard = num_segments // self.r_hard
 
         rgb, flow = x[:, :, :1024], x[:, :, 1024:]
-        rgb, flow, o_rgb, o_flow = self.mga(rgb, flow)
+        rgb, flow = self.mha(rgb, flow)
         x = torch.cat((rgb, flow), dim=-1)
 
         embeddings, cas, actionness = self.actionness_module(x)
@@ -155,11 +179,7 @@ class CoLA(nn.Module):
             'EA': easy_act,
             'EB': easy_bkg,
             'HA': hard_act,
-            'HB': hard_bkg,
-            'RGB': o_rgb,
-            'FLOW': o_flow,
-            'NUM_HEAD': self.num_head,
-            'LAMDA': self.lamda
+            'HB': hard_bkg
         }
 
         return video_scores, contrast_pairs, actionness, cas
