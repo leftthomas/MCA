@@ -90,6 +90,8 @@ class CO2(torch.nn.Module):
         dropout_ratio = args['opt'].dropout_ratio
         reduce_ratio = args['opt'].reduce_ratio
 
+        self.cma = CMA(n_feature // 2, args['opt'].num_head)
+
         self.vAttn = getattr(model, args['opt'].AWM)(1024, args)
         self.fAttn = getattr(model, args['opt'].AWM)(1024, args)
 
@@ -109,8 +111,6 @@ class CO2(torch.nn.Module):
         self.ce_criterion = nn.BCELoss()
 
         self.apply(weights_init)
-
-        self.cma = CMA(n_feature // 2, args['opt'].num_head)
 
     def forward(self, inputs, is_training=True, **args):
         rgb, flow = inputs[:, :, :1024], inputs[:, :, 1024:]
@@ -269,6 +269,8 @@ class ANT_CO2(torch.nn.Module):
         dropout_ratio = args['opt'].dropout_ratio
         reduce_ratio = args['opt'].reduce_ratio
 
+        self.cma = CMA(n_feature // 2, args['opt'].num_head)
+
         self.vAttn = getattr(model, args['opt'].AWM)(1024, args)
         self.fAttn = getattr(model, args['opt'].AWM)(1024, args)
 
@@ -290,8 +292,6 @@ class ANT_CO2(torch.nn.Module):
         self.pool = nn.AvgPool1d(_kernel, 1, padding=_kernel // 2, count_include_pad=True) \
             if _kernel is not None else nn.Identity()
         self.apply(weights_init)
-
-        self.cma = CMA(n_feature // 2, args['opt'].num_head)
 
     def forward(self, inputs, is_training=True, **args):
         rgb, flow = inputs[:, :, :1024], inputs[:, :, 1024:]
