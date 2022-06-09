@@ -35,7 +35,7 @@ cfg.UP_SCALE = 24
 cfg.GT_PATH = os.path.join(cfg.DATA_PATH, 'gt.json')
 cfg.SEED = 0
 cfg.FEATS_FPS = 25
-cfg.NUM_SEGMENTS = 750
+cfg.NUM_SEGMENTS = 500
 
 cfg.NUM_HEAD = 4
 
