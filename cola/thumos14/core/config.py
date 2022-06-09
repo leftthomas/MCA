@@ -20,8 +20,8 @@ cfg.BATCH_SIZE = 16
 cfg.DATA_PATH = './data/THUMOS14'
 cfg.NUM_WORKERS = 8
 cfg.LAMBDA = 0.01
-cfg.R_EASY = 5
-cfg.R_HARD = 20
+cfg.R_EASY = 15
+cfg.R_HARD = 18
 cfg.m = 3
 cfg.M = 6
 cfg.TEST_FREQ = 100
@@ -35,7 +35,7 @@ cfg.UP_SCALE = 24
 cfg.GT_PATH = os.path.join(cfg.DATA_PATH, 'gt.json')
 cfg.SEED = 0
 cfg.FEATS_FPS = 25
-cfg.NUM_SEGMENTS = 500
+cfg.NUM_SEGMENTS = 750
 
 cfg.NUM_HEAD = 4
 
