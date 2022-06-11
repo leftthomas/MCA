@@ -22,7 +22,7 @@ cfg.DATA_PATH = './data/ActivityNet12'
 cfg.NUM_WORKERS = 8
 cfg.LAMBDA = 0.01
 cfg.R_EASY = 10
-cfg.R_HARD = 8
+cfg.R_HARD = 10
 cfg.m = 3
 cfg.M = 6
 cfg.TEST_FREQ = 500
@@ -36,7 +36,7 @@ cfg.UP_SCALE = 24
 cfg.GT_PATH = os.path.join(cfg.DATA_PATH, 'gt.json')
 cfg.SEED = 0
 cfg.FEATS_FPS = 25
-cfg.NUM_SEGMENTS = 50
+cfg.NUM_SEGMENTS = 60
 
 cfg.NUM_HEAD = 4
 
