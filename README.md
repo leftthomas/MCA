@@ -1,7 +1,7 @@
-# AGCT
+# MCA
 
-A PyTorch implementation of AGCT based on the paper
-[Attention Guided Collaborative Training for Weakly-supervised Temporal Action Localization]().
+A PyTorch implementation of MCA based on the paper
+[Weakly-supervised Temporal Action Localization with Multi-head Cross-modal Attention]().
 
 ![Network Architecture](structure.png)
 
@@ -49,39 +49,39 @@ The models are trained on one NVIDIA GeForce TITAN X GPU (12G). All the hyper-pa
 <tbody>
   <tr>
     <td align="center"><a href="https://github.com/asrafulashiq/hamnet">HAM-Net</a></td>
-    <td align="center">65.9</td>
-    <td align="center">59.4</td>
-    <td align="center">51.0</td>
-    <td align="center">41.2</td>
-    <td align="center">31.1</td>
-    <td align="center">20.4</td>
-    <td align="center">10.9</td>
-    <td align="center">40.0</td>
-    <td align="center"><a href="https://pan.baidu.com/s/1mv-RHb9VNu2FYBdzjNehPA">MEGA</a></td>
+    <td align="center">66.8</td>
+    <td align="center">60.9</td>
+    <td align="center">52.2</td>
+    <td align="center">42.9</td>
+    <td align="center">33.4</td>
+    <td align="center">22.7</td>
+    <td align="center">12.2</td>
+    <td align="center">41.6</td>
+    <td align="center"><a href="https://1drv.ms/u/s!AtyHkt-GdJtIilloJ6Uo867V9yr8?e=aWvLyY">OneDrive</a></td>
   </tr>
   <tr>
     <td align="center"><a href="https://github.com/zhang-can/CoLA">CoLA</a></td>
-    <td align="center">66.5</td>
-    <td align="center">60.3</td>
-    <td align="center">52.1</td>
-    <td align="center">42.8</td>
-    <td align="center">33.8</td>
-    <td align="center">23.7</td>
-    <td align="center">12.7</td>
-    <td align="center">41.7</td>
-    <td align="center"><a href="https://pan.baidu.com/s/1mv-RHb9VNu2FYBdzjNehPA">MEGA</a></td>
+    <td align="center">67.5</td>
+    <td align="center">60.6</td>
+    <td align="center">51.9</td>
+    <td align="center">43.2</td>
+    <td align="center">34.2</td>
+    <td align="center">24.2</td>
+    <td align="center">13.9</td>
+    <td align="center">42.2</td>
+    <td align="center"><a href="https://1drv.ms/u/s!AtyHkt-GdJtIilhzTkTD-uZvy4ya?e=PFdCWR">OneDrive</a></td>
   </tr>
   <tr>
     <td align="center"><a href="https://github.com/harlanhong/MM2021-CO2-Net">CO<sub>2</sub>-Net</a></td>
-    <td align="center">69.1</td>
-    <td align="center">63.4</td>
-    <td align="center">53.8</td>
-    <td align="center">45.0</td>
-    <td align="center">37.1</td>
-    <td align="center">24.6</td>
-    <td align="center">12.7</td>
-    <td align="center">43.7</td>
-    <td align="center"><a href="https://pan.baidu.com/s/1mv-RHb9VNu2FYBdzjNehPA">MEGA</a></td>
+    <td align="center">70.8</td>
+    <td align="center">64.7</td>
+    <td align="center">55.7</td>
+    <td align="center">46.8</td>
+    <td align="center">39.8</td>
+    <td align="center">26.5</td>
+    <td align="center">13.8</td>
+    <td align="center">45.4</td>
+    <td align="center"><a href="https://1drv.ms/u/s!AtyHkt-GdJtIilfZvzmjkg9BcFTx?e=0ptemo">OneDrive</a></td>
   </tr>
 </tbody>
 </table>
@@ -107,27 +107,27 @@ mAP@AVG is the average mAP under the thresholds 0.1:0.1:0.7.
 <tbody>
   <tr>
     <td align="center"><a href="https://github.com/asrafulashiq/hamnet">HAM-Net</a></td>
-    <td align="center">41.1</td>
-    <td align="center">24.6</td>
-    <td align="center">5.0</td>
-    <td align="center">24.5</td>
-    <td align="center"><a href="https://pan.baidu.com/s/11_7eu29IQ50rBU2W-dFceg">MEGA</a></td>
+    <td align="center">41.3</td>
+    <td align="center">25.2</td>
+    <td align="center">5.5</td>
+    <td align="center">25.4</td>
+    <td align="center"><a href="https://1drv.ms/u/s!AtyHkt-GdJtIilTBE-4dzLgc3Okw?e=naUsTl">OneDrive</a></td>
   </tr>
   <tr>
     <td align="center"><a href="https://github.com/zhang-can/CoLA">CoLA</a></td>
-    <td align="center">40.5</td>
-    <td align="center">26.7</td>
-    <td align="center">2.9</td>
-    <td align="center">25.8</td>
-    <td align="center"><a href="https://pan.baidu.com/s/11_7eu29IQ50rBU2W-dFceg">MEGA</a></td>
+    <td align="center">41.0</td>
+    <td align="center">27.5</td>
+    <td align="center">4.2</td>
+    <td align="center">26.4</td>
+    <td align="center"><a href="https://1drv.ms/u/s!AtyHkt-GdJtIilYYT3fWJqCg76g5?e=nSzmUr">OneDrive</a></td>
   </tr>
   <tr>
     <td align="center"><a href="https://github.com/harlanhong/MM2021-CO2-Net">CO<sub>2</sub>-Net</a></td>
-    <td align="center">43.1</td>
-    <td align="center">26.0</td>
-    <td align="center">5.3</td>
-    <td align="center">26.2</td>
-    <td align="center"><a href="https://pan.baidu.com/s/11_7eu29IQ50rBU2W-dFceg">MEGA</a></td>
+    <td align="center">44.4</td>
+    <td align="center">27.0</td>
+    <td align="center">5.4</td>
+    <td align="center">27.1</td>
+    <td align="center"><a href="https://1drv.ms/u/s!AtyHkt-GdJtIilVBJFZ7mhdg1uM4?e=rx7BKz">OneDrive</a></td>
   </tr>
 </tbody>
 </table>
