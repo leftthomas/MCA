@@ -3,7 +3,7 @@
 A PyTorch implementation of MCA based on the paper
 [Weakly-supervised Temporal Action Localization with Multi-head Cross-modal Attention]().
 
-![Network Architecture](structure.png)
+![Network Architecture](mca.png)
 
 ## Usage
 
@@ -133,3 +133,7 @@ mAP@AVG is the average mAP under the thresholds 0.1:0.1:0.7.
 </table>
 
 mAP@AVG is the average mAP under the thresholds 0.5:0.05:0.95.
+
+## Results
+
+![vis](vis.png)
