@@ -1,7 +1,7 @@
 # MCA
 
 A PyTorch implementation of MCA based on PRICAI 2022 paper
-[Weakly-supervised Temporal Action Localization with Multi-head Cross-modal Attention]().
+[Weakly-supervised Temporal Action Localization with Multi-head Cross-modal Attention](https://link.springer.com/chapter/10.1007/978-3-031-20868-3_21).
 
 ![Network Architecture](mca.png)
 
